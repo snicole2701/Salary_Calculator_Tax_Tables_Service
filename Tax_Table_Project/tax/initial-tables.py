@@ -1,48 +1,74 @@
-from sqlalchemy import create_engine, Column, Integer, Float, Date, MetaData, Table
+from sqlalchemy import create_engine, Column, Integer, Float, Date, MetaData, Table, String
 from datetime import datetime
 
 # Database connection
 engine = create_engine('sqlite:///tax_database.db')  # Connect to (or create) the database
 metadata = MetaData()
 
-def create_and_populate_table(table_name, effective_date, end_date, tax_data):
+# Define the tax_table schema
+tax_table = Table(
+    'tax_table', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('table_name', String, nullable=False),  # Name of the related tax period table
+    Column('financial_year', Integer, nullable=False),
+    Column('effective_date', Date, nullable=False),
+    Column('end_date', Date, nullable=False)
+)
+
+def create_tax_period_table(table_name, tax_data):
     """
-    Creates and populates a table in the database.
+    Creates and populates a tax period table in the database.
     Args:
         table_name (str): The name of the table to create.
-        effective_date (datetime.date): The effective date of the data.
-        end_date (datetime.date): The end date of the data.
         tax_data (list): The data to populate the table with.
     """
-    # Define table schema
+    # Define the tax period table schema
     table = Table(
         table_name, metadata,
         Column('id', Integer, primary_key=True, autoincrement=True),
         Column('min_income', Integer),
         Column('max_income', Integer),
         Column('tax_on_previous_bracket', Float),
-        Column('tax_percentage', Float),
-        Column('effective_date', Date),
-        Column('end_date', Date)
+        Column('tax_percentage', Float)
     )
 
-    # Create the table in the database
+    # Create the table
     metadata.create_all(engine)
     print(f"Table '{table_name}' created successfully!")
 
-    # Add effective_date and end_date to each row in tax_data
-    for entry in tax_data:
-        entry['effective_date'] = effective_date
-        entry['end_date'] = end_date
-
     # Populate the table with data
     with engine.connect() as conn:
-        with conn.begin():  # Begin a transaction
+        with conn.begin():  # Start a transaction
             conn.execute(table.insert(), tax_data)
             print(f"Data committed into '{table_name}' successfully!")
 
+def create_and_populate_tax_table():
+    """
+    Creates and populates the tax_table with links to tax period tables and their metadata.
+    """
+    metadata.create_all(engine)  # Create the table
+    print("Table 'tax_table' created successfully!")
+
+    tax_periods = [
+        {'table_name': 'tax_period_2024', 'financial_year': 2024,
+         'effective_date': datetime.strptime('2023-03-01', '%Y-%m-%d').date(),
+         'end_date': datetime.strptime('2024-02-28', '%Y-%m-%d').date()},
+        {'table_name': 'tax_period_2025', 'financial_year': 2025,
+         'effective_date': datetime.strptime('2024-03-01', '%Y-%m-%d').date(),
+         'end_date': datetime.strptime('2025-02-28', '%Y-%m-%d').date()},
+        {'table_name': 'tax_period_2026', 'financial_year': 2026,
+         'effective_date': datetime.strptime('2025-03-01', '%Y-%m-%d').date(),
+         'end_date': datetime.strptime('2026-02-28', '%Y-%m-%d').date()},
+    ]
+
+    # Insert tax period metadata into tax_table
+    with engine.connect() as conn:
+        with conn.begin():  # Start a transaction
+            conn.execute(tax_table.insert(), tax_periods)
+            print("Tax periods inserted into 'tax_table' successfully!")
+
 if __name__ == "__main__":
-    # Shared Tax Bracket Data for All Tables
+    # Shared tax bracket data for all tax period tables
     tax_data = [
         {'min_income': 1, 'max_income': 237100, 'tax_on_previous_bracket': 0, 'tax_percentage': 18},
         {'min_income': 237101, 'max_income': 370500, 'tax_on_previous_bracket': 42678, 'tax_percentage': 26},
@@ -53,26 +79,10 @@ if __name__ == "__main__":
         {'min_income': 1817001, 'max_income': 9999999999, 'tax_on_previous_bracket': 644489, 'tax_percentage': 45},
     ]
 
-    # Table 1: tax_period_2024
-    create_and_populate_table(
-        table_name='tax_period_2024',
-        effective_date=datetime.strptime('2023-03-01', '%Y-%m-%d').date(),
-        end_date=datetime.strptime('2024-02-28', '%Y-%m-%d').date(),
-        tax_data=tax_data
-    )
+    # Create and populate individual tax period tables
+    create_tax_period_table('tax_period_2024', tax_data)
+    create_tax_period_table('tax_period_2025', tax_data)
+    create_tax_period_table('tax_period_2026', tax_data)
 
-    # Table 2: tax_period_2025
-    create_and_populate_table(
-        table_name='tax_period_2025',
-        effective_date=datetime.strptime('2024-03-01', '%Y-%m-%d').date(),
-        end_date=datetime.strptime('2025-02-28', '%Y-%m-%d').date(),
-        tax_data=tax_data
-    )
-
-    # Table 3: tax_period_2026
-    create_and_populate_table(
-        table_name='tax_period_2026',
-        effective_date=datetime.strptime('2025-03-01', '%Y-%m-%d').date(),
-        end_date=datetime.strptime('2026-02-28', '%Y-%m-%d').date(),
-        tax_data=tax_data
-    )
+    # Create and populate tax_table metadata
+    create_and_populate_tax_table()
