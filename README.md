@@ -24,7 +24,7 @@ Get Tax Rate (POST/get-tax-rate):
 - Retrieves the applicable tax information for the given income, age and period
 
 Get Rebate (POST/get-rebate):
-- Retrieves rebateinformation for given age and period
+- Retrieves rebate information for given age and period
 
 Health Checks (Get/health):
 - Confirms the service is operational by returning a status message
