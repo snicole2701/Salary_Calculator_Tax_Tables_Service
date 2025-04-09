@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, text
 import os
 import logging
+import datetime
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -67,6 +68,47 @@ def get_tax_rate():
         logging.error(f"Error executing query: {e}")
         return jsonify({"error": "Database error"}), 500
 
+@app.route("/get-tax-details", methods=["POST"])
+def get_tax_details():
+    """Fetch applicable tax details."""
+    data = request.json
+
+    # Validate input
+    month = data.get("month")
+    year = data.get("year")
+    income = data.get("income")
+    if not all([month, year, income]):
+        return jsonify({"error": "Month, year, and income are required"}), 400
+
+    try:
+        # Convert month/year to datetime
+        input_date = datetime.datetime(year, month, 1)
+
+        # Query tax_table for the applicable tax table
+        query = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
+        tax_table = tax_engine.execute(query, {"date": input_date}).fetchone()
+
+        if tax_table:
+            # Query specific tax period table based on income
+            tax_table_name = tax_table["table_name"]
+            query = text(f"SELECT * FROM {tax_table_name} WHERE min_income <= :income AND max_income >= :income")
+            row = tax_engine.execute(query, {"income": income}).fetchone()
+
+            if row:
+                return jsonify({
+                    "financial_year": tax_table["financial_year"],
+                    "tax_percentage": row["tax_percentage"],
+                    "tax_on_previous_bracket": row["tax_on_previous_bracket"]
+                }), 200
+            else:
+                return jsonify({"error": "No matching tax row found"}), 404
+        else:
+            return jsonify({"error": "No applicable tax table found"}), 404
+
+    except Exception as e:
+        logging.error(f"Error in /get-tax-details: {e}")
+        return jsonify({"error": "Database error"}), 500
+
 @app.route("/get-rebate", methods=["POST"])
 def get_rebate():
     """Fetch rebate amount based on criteria."""
@@ -91,6 +133,39 @@ def get_rebate():
             return jsonify({"error": "Rebate not found"}), 404
     except Exception as e:
         logging.error(f"Error executing query: {e}")
+        return jsonify({"error": "Database error"}), 500
+
+@app.route("/get-rebate-details", methods=["POST"])
+def get_rebate_details():
+    """Fetch applicable rebate details."""
+    data = request.json
+
+    # Validate input
+    age = data.get("age")
+    financial_year = data.get("financial_year")
+    if not all([age, financial_year]):
+        return jsonify({"error": "Age and financial year are required"}), 400
+
+    try:
+        # Determine age group
+        if age <= 64:
+            age_group = "Primary"
+        elif 65 <= age <= 74:
+            age_group = "Secondary"
+        else:
+            age_group = "Tertiary"
+
+        # Query rebate_table
+        query = text("SELECT * FROM rebate_table WHERE age_group = :age_group AND financial_year = :year")
+        row = rebate_engine.execute(query, {"age_group": age_group, "year": financial_year}).fetchone()
+
+        if row:
+            return jsonify({"rebate_amount": row["rebate_amount"]}), 200
+        else:
+            return jsonify({"error": "No matching rebate found"}), 404
+
+    except Exception as e:
+        logging.error(f"Error in /get-rebate-details: {e}")
         return jsonify({"error": "Database error"}), 500
 
 @app.route("/health", methods=["GET"])
