@@ -53,13 +53,13 @@ def fetch_user_input():
 @app.route("/get-tax-details", methods=["POST"])
 def get_tax_details():
     """
-    Fetch applicable tax details.
+    Fetch applicable tax details and rebate details.
     """
     logging.info("Accessing /get-tax-details route")
     data = request.json
 
     # Fetch missing user input from User Input Service if not provided
-    if not all([data.get("month"), data.get("year"), data.get("projected_annual_income"), data.get("projected_annual_income_plus_bonus_leave")]):
+    if not all([data.get("month"), data.get("year"), data.get("projected_annual_income"), data.get("projected_annual_income_plus_bonus_leave"), data.get("age_group")]):
         user_input = fetch_user_input()
         if "error" in user_input:
             return jsonify({"error": user_input["error"]}), 500
@@ -70,6 +70,7 @@ def get_tax_details():
     try:
         month = data["month"]
         year = data["year"]
+        age_group = data["age_group"]
         projected_annual_income = data["projected_annual_income"]
         projected_annual_income_plus_bonus_leave = data["projected_annual_income_plus_bonus_leave"]
 
@@ -77,11 +78,12 @@ def get_tax_details():
         input_date = datetime.datetime(year, month, 1)
 
         # Query tax_table for the applicable tax table
-        query = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
-        tax_table = tax_engine.execute(query, {"date": input_date}).fetchone()
+        query_tax_table = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
+        tax_table = tax_engine.execute(query_tax_table, {"date": input_date}).fetchone()
 
         if tax_table:
             tax_table_name = tax_table["table_name"]
+            financial_year = tax_table["financial_year"]
 
             # Query tax details for projected_annual_income
             query_projected_income = text(f"""
@@ -99,17 +101,22 @@ def get_tax_details():
             """)
             row_projected_income_plus_bonus_leave = tax_engine.execute(query_projected_income_plus_bonus_leave, {"income": projected_annual_income_plus_bonus_leave}).fetchone()
 
-            if row_projected_income and row_projected_income_plus_bonus_leave:
+            # Query rebate table for rebate details based on age_group and financial_year
+            query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
+            rebate_row = rebate_engine.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
+
+            if row_projected_income and row_projected_income_plus_bonus_leave and rebate_row:
                 return jsonify({
-                    "financial_year": tax_table["financial_year"],
+                    "financial_year": financial_year,
                     "projected_annual_income_tax_percentage": row_projected_income["tax_percentage"],
                     "projected_annual_income_tax_on_previous_brackets": row_projected_income["tax_on_previous_bracket"],
                     "income_tax_percentage": row_projected_income_plus_bonus_leave["tax_percentage"],
-                    "income_tax_on_previous_brackets": row_projected_income_plus_bonus_leave["tax_on_previous_bracket"]
+                    "income_tax_on_previous_brackets": row_projected_income_plus_bonus_leave["tax_on_previous_bracket"],
+                    "rebate_value": rebate_row["rebate_value"]
                 }), 200
             else:
-                logging.warning("No matching tax rows found for one or both income values")
-                return jsonify({"error": "No matching tax rows found for one or both income values"}), 404
+                logging.warning("No matching tax rows or rebate details found")
+                return jsonify({"error": "No matching tax rows or rebate details found"}), 404
         else:
             logging.warning("No applicable tax table found")
             return jsonify({"error": "No applicable tax table found"}), 404
