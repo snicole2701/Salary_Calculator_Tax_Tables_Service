@@ -50,70 +50,6 @@ def fetch_user_input():
         logging.error(f"Failed to connect to User Input Service: {e}")
         return {"error": "Connection to User Input Service failed"}
 
-@app.route("/fetch-user-input", methods=["GET"])
-def fetch_user_input_endpoint():
-    """
-    Endpoint to fetch user input from User Input Service.
-    """
-    logging.info("Accessing /fetch-user-input route")
-    user_input = fetch_user_input()
-    if "error" in user_input:
-        return jsonify({"error": user_input["error"]}), 500
-    return jsonify({"user_input": user_input}), 200
-
-@app.route("/test-user-input-service", methods=["GET"])
-def test_user_input_service():
-    """
-    Test connection with User Input Service.
-    """
-    url = f"{USER_INPUT_SERVICE_BASE_URL}/health"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            logging.info("User Input Service is healthy")
-            return jsonify({"user_input_service_status": "Healthy"}), 200
-        else:
-            logging.warning("User Input Service is unhealthy")
-            return jsonify({"user_input_service_status": "Unhealthy"}), 500
-    except requests.RequestException as e:
-        logging.error(f"Failed to connect to User Input Service: {e}")
-        return jsonify({"error": f"Failed to connect: {e}"}), 500
-
-@app.route("/get-tax-rate", methods=["POST"])
-def get_tax_rate():
-    """
-    Fetch tax rate based on income.
-    """
-    logging.info("Accessing /get-tax-rate route")
-    data = request.json
-
-    # Validate input
-    income = data.get("income")
-    if not income:
-        logging.error("Income is required")
-        return jsonify({"error": "Income is required"}), 400
-    if not isinstance(income, (int, float)) or income < 0:
-        logging.error("Invalid income value")
-        return jsonify({"error": "Invalid income value"}), 400
-
-    # Execute query safely
-    query = text("""
-        SELECT rate
-        FROM tax_table
-        WHERE min_income <= :income AND max_income >= :income
-    """)
-    try:
-        result = tax_engine.execute(query, {"income": income}).fetchone()
-        if result:
-            logging.info(f"Tax rate found: {result['rate']}")
-            return jsonify({"tax_rate": result["rate"]}), 200
-        else:
-            logging.warning("Tax rate not found")
-            return jsonify({"error": "Tax rate not found"}), 404
-    except Exception as e:
-        logging.error(f"Error executing query: {e}")
-        return jsonify({"error": "Database error"}), 500
-
 @app.route("/get-tax-details", methods=["POST"])
 def get_tax_details():
     """
@@ -123,7 +59,7 @@ def get_tax_details():
     data = request.json
 
     # Fetch missing user input from User Input Service if not provided
-    if not all([data.get("month"), data.get("year"), data.get("income")]):
+    if not all([data.get("month"), data.get("year"), data.get("projected_annual_income"), data.get("projected_annual_income_plus_bonus_leave")]):
         user_input = fetch_user_input()
         if "error" in user_input:
             return jsonify({"error": user_input["error"]}), 500
@@ -134,7 +70,8 @@ def get_tax_details():
     try:
         month = data["month"]
         year = data["year"]
-        income = data["income"]
+        projected_annual_income = data["projected_annual_income"]
+        projected_annual_income_plus_bonus_leave = data["projected_annual_income_plus_bonus_leave"]
 
         # Convert month/year to datetime
         input_date = datetime.datetime(year, month, 1)
@@ -144,20 +81,35 @@ def get_tax_details():
         tax_table = tax_engine.execute(query, {"date": input_date}).fetchone()
 
         if tax_table:
-            # Query specific tax period table based on income
             tax_table_name = tax_table["table_name"]
-            query = text(f"SELECT * FROM {tax_table_name} WHERE min_income <= :income AND max_income >= :income")
-            row = tax_engine.execute(query, {"income": income}).fetchone()
 
-            if row:
+            # Query tax details for projected_annual_income
+            query_projected_income = text(f"""
+                SELECT tax_percentage, tax_on_previous_bracket
+                FROM {tax_table_name}
+                WHERE min_income <= :income AND max_income >= :income
+            """)
+            row_projected_income = tax_engine.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
+
+            # Query tax details for projected_annual_income_plus_bonus_leave
+            query_projected_income_plus_bonus_leave = text(f"""
+                SELECT tax_percentage, tax_on_previous_bracket
+                FROM {tax_table_name}
+                WHERE min_income <= :income AND max_income >= :income
+            """)
+            row_projected_income_plus_bonus_leave = tax_engine.execute(query_projected_income_plus_bonus_leave, {"income": projected_annual_income_plus_bonus_leave}).fetchone()
+
+            if row_projected_income and row_projected_income_plus_bonus_leave:
                 return jsonify({
                     "financial_year": tax_table["financial_year"],
-                    "tax_percentage": row["tax_percentage"],
-                    "tax_on_previous_bracket": row["tax_on_previous_bracket"]
+                    "projected_annual_income_tax_percentage": row_projected_income["tax_percentage"],
+                    "projected_annual_income_tax_on_previous_brackets": row_projected_income["tax_on_previous_bracket"],
+                    "income_tax_percentage": row_projected_income_plus_bonus_leave["tax_percentage"],
+                    "income_tax_on_previous_brackets": row_projected_income_plus_bonus_leave["tax_on_previous_bracket"]
                 }), 200
             else:
-                logging.warning("No matching tax row found")
-                return jsonify({"error": "No matching tax row found"}), 404
+                logging.warning("No matching tax rows found for one or both income values")
+                return jsonify({"error": "No matching tax rows found for one or both income values"}), 404
         else:
             logging.warning("No applicable tax table found")
             return jsonify({"error": "No applicable tax table found"}), 404
