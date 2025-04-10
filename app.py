@@ -59,7 +59,8 @@ def get_tax_details():
     data = request.json
 
     # Fetch missing user input from User Input Service if not provided
-    if not all([data.get("month"), data.get("year"), data.get("projected_annual_income"), data.get("projected_annual_income_plus_bonus_leave"), data.get("age_group")]):
+    if not all([data.get("month"), data.get("year"), data.get("projected_annual_income"),
+                data.get("projected_annual_income_plus_bonus_leave"), data.get("age_group")]):
         user_input = fetch_user_input()
         if "error" in user_input:
             return jsonify({"error": user_input["error"]}), 500
@@ -81,45 +82,59 @@ def get_tax_details():
         query_tax_table = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
         tax_table = tax_engine.execute(query_tax_table, {"date": input_date}).fetchone()
 
-        if tax_table:
-            tax_table_name = tax_table["table_name"]
-            financial_year = tax_table["financial_year"]
-
-            # Query tax details for projected_annual_income
-            query_projected_income = text(f"""
-                SELECT tax_percentage, tax_on_previous_bracket
-                FROM {tax_table_name}
-                WHERE min_income <= :income AND max_income >= :income
-            """)
-            row_projected_income = tax_engine.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
-
-            # Query tax details for projected_annual_income_plus_bonus_leave
-            query_projected_income_plus_bonus_leave = text(f"""
-                SELECT tax_percentage, tax_on_previous_bracket
-                FROM {tax_table_name}
-                WHERE min_income <= :income AND max_income >= :income
-            """)
-            row_projected_income_plus_bonus_leave = tax_engine.execute(query_projected_income_plus_bonus_leave, {"income": projected_annual_income_plus_bonus_leave}).fetchone()
-
-            # Query rebate table for rebate details based on age_group and financial_year
-            query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
-            rebate_row = rebate_engine.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
-
-            if row_projected_income and row_projected_income_plus_bonus_leave and rebate_row:
-                return jsonify({
-                    "financial_year": financial_year,
-                    "projected_annual_income_tax_percentage": row_projected_income["tax_percentage"],
-                    "projected_annual_income_tax_on_previous_brackets": row_projected_income["tax_on_previous_bracket"],
-                    "income_tax_percentage": row_projected_income_plus_bonus_leave["tax_percentage"],
-                    "income_tax_on_previous_brackets": row_projected_income_plus_bonus_leave["tax_on_previous_bracket"],
-                    "rebate_value": rebate_row["rebate_value"]
-                }), 200
-            else:
-                logging.warning("No matching tax rows or rebate details found")
-                return jsonify({"error": "No matching tax rows or rebate details found"}), 404
-        else:
+        if not tax_table:
             logging.warning("No applicable tax table found")
             return jsonify({"error": "No applicable tax table found"}), 404
+
+        tax_table_name = tax_table["table_name"]
+        financial_year = tax_table["financial_year"]
+
+        # Query tax details for projected_annual_income
+        query_projected_income = text(f"""
+            SELECT min_income, tax_on_previous_bracket, tax_percentage
+            FROM {tax_table_name}
+            WHERE min_income <= :income AND max_income >= :income
+        """)
+        row_projected_income = tax_engine.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
+
+        if not row_projected_income:
+            logging.warning("No matching tax row found for projected_annual_income")
+            return jsonify({"error": "No matching tax row for projected_annual_income"}), 404
+
+        # Query tax details for projected_annual_income_plus_bonus_leave
+        query_projected_income_plus_bonus_leave = text(f"""
+            SELECT min_income, tax_on_previous_bracket, tax_percentage
+            FROM {tax_table_name}
+            WHERE min_income <= :income AND max_income >= :income
+        """)
+        row_projected_income_plus_bonus_leave = tax_engine.execute(
+            query_projected_income_plus_bonus_leave,
+            {"income": projected_annual_income_plus_bonus_leave}
+        ).fetchone()
+
+        if not row_projected_income_plus_bonus_leave:
+            logging.warning("No matching tax row found for projected_annual_income_plus_bonus_leave")
+            return jsonify({"error": "No matching tax row for projected_annual_income_plus_bonus_leave"}), 404
+
+        # Query rebate table for rebate details based on age_group and financial_year
+        query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
+        rebate_row = rebate_engine.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
+
+        if not rebate_row:
+            logging.warning("No matching rebate row found")
+            return jsonify({"error": "No matching rebate row found"}), 404
+
+        # Return data
+        return jsonify({
+            "financial_year": financial_year,
+            "projected_annual_income_min_income": row_projected_income["min_income"],
+            "projected_annual_income_tax_on_previous_brackets": row_projected_income["tax_on_previous_bracket"],
+            "projected_annual_income_tax_percentage": row_projected_income["tax_percentage"],
+            "income_tax_min_income": row_projected_income_plus_bonus_leave["min_income"],
+            "income_tax_on_previous_brackets": row_projected_income_plus_bonus_leave["tax_on_previous_bracket"],
+            "income_tax_percentage": row_projected_income_plus_bonus_leave["tax_percentage"],
+            "rebate_value": rebate_row["rebate_value"]
+        }), 200
 
     except Exception as e:
         logging.error(f"Error in /get-tax-details: {e}")
