@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
 import os
 import logging
 import datetime
@@ -13,8 +12,8 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Database connection setup
-TAX_DB_URI = os.getenv("TAX_DB_URI")
-REBATE_DB_URI = os.getenv("REBATE_DB_URI")
+TAX_DB_URI = os.getenv("TAX_DB_URI", "sqlite:///tax_database.db")
+REBATE_DB_URI = os.getenv("REBATE_DB_URI", "sqlite:///rebate_database.db")
 USER_INPUT_SERVICE_BASE_URL = os.getenv("USER_INPUT_SERVICE_BASE_URL", "https://salary-calculator-user-input.onrender.com")
 CALCULATION_SERVICE_BASE_URL = os.getenv("CALCULATION_SERVICE_BASE_URL", "https://salary-calculator-calculation-service.onrender.com")
 
@@ -100,7 +99,6 @@ def get_tax_details():
 
     # Validate and prepare data for calculation
     try:
-        # Query the tax table based on income details
         month = data["month"]
         year = data["year"]
         age_group = data["age_group"]
@@ -109,38 +107,51 @@ def get_tax_details():
 
         input_date = datetime.datetime(year, month, 1)
 
+        # Find the relevant tax period table
+        relevant_table = None
         with tax_engine.connect() as connection:
-            query_tax_table = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
-            tax_table = connection.execute(query_tax_table, {"date": input_date}).fetchone()
+            tables_query = text("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'tax_period_%';")
+            tables = connection.execute(tables_query).fetchall()
+            logging.info(f"Available tax period tables: {[table[0] for table in tables]}")
 
-            if not tax_table:
-                logging.warning("No applicable tax table found")
-                return jsonify({"error": "No applicable tax table found"}), 404
+            for table in tables:
+                table_name = table[0]
+                check_date_query = text(f"SELECT COUNT(*) FROM {table_name} WHERE effective_date <= :date AND end_date >= :date;")
+                count = connection.execute(check_date_query, {"date": input_date}).scalar()
+                if count > 0:
+                    relevant_table = table_name
+                    break
 
-            tax_table_name = tax_table["table_name"]
-            financial_year = tax_table["financial_year"]
+            if not relevant_table:
+                logging.warning("No applicable tax period table found")
+                return jsonify({"error": "No applicable tax period table found"}), 404
 
-            query_projected_income = text(f"""
+            logging.info(f"Relevant tax period table: {relevant_table}")
+
+            # Query the relevant table for the projected income details
+            income_query = text(f"""
                 SELECT min_income, tax_on_previous_bracket, tax_percentage
-                FROM {tax_table_name}
-                WHERE min_income <= :income AND max_income >= :income
+                FROM {relevant_table}
+                WHERE min_income <= :income AND max_income >= :income;
             """)
-            row_projected_income = connection.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
+            row_projected_income = connection.execute(income_query, {"income": projected_annual_income}).fetchone()
 
             if not row_projected_income:
                 logging.warning("No matching tax row found for projected_annual_income")
                 return jsonify({"error": "No matching tax row for projected_annual_income"}), 404
 
+        # Query the rebate table for rebate details
         with rebate_engine.connect() as connection:
-            query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
-            rebate_row = connection.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
+            rebate_query = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
+            rebate_row = connection.execute(rebate_query, {"age_group": age_group, "financial_year": year}).fetchone()
 
             if not rebate_row:
                 logging.warning("No matching rebate row found")
                 return jsonify({"error": "No matching rebate row found"}), 404
 
+        # Compile tax details
         tax_details = {
-            "financial_year": financial_year,
+            "financial_year": year,
             "projected_annual_income_min_income": row_projected_income["min_income"],
             "projected_annual_income_tax_on_previous_brackets": row_projected_income["tax_on_previous_bracket"],
             "projected_annual_income_tax_percentage": row_projected_income["tax_percentage"],
