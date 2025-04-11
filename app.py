@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 import os
 import logging
 import datetime
@@ -28,8 +29,8 @@ logging.info(f"CALCULATION_SERVICE_BASE_URL: {CALCULATION_SERVICE_BASE_URL}")
 
 # Create database engines
 try:
-    tax_engine = create_engine(TAX_DB_URI)
-    rebate_engine = create_engine(REBATE_DB_URI)
+    tax_engine = create_engine(TAX_DB_URI, future=True)
+    rebate_engine = create_engine(REBATE_DB_URI, future=True)
 except Exception as e:
     logging.error(f"Error creating database engines: {e}")
     raise
@@ -108,33 +109,35 @@ def get_tax_details():
 
         input_date = datetime.datetime(year, month, 1)
 
-        query_tax_table = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
-        tax_table = tax_engine.execute(query_tax_table, {"date": input_date}).fetchone()
+        with tax_engine.connect() as connection:
+            query_tax_table = text("SELECT * FROM tax_table WHERE effective_date <= :date AND end_date >= :date")
+            tax_table = connection.execute(query_tax_table, {"date": input_date}).fetchone()
 
-        if not tax_table:
-            logging.warning("No applicable tax table found")
-            return jsonify({"error": "No applicable tax table found"}), 404
+            if not tax_table:
+                logging.warning("No applicable tax table found")
+                return jsonify({"error": "No applicable tax table found"}), 404
 
-        tax_table_name = tax_table["table_name"]
-        financial_year = tax_table["financial_year"]
+            tax_table_name = tax_table["table_name"]
+            financial_year = tax_table["financial_year"]
 
-        query_projected_income = text(f"""
-            SELECT min_income, tax_on_previous_bracket, tax_percentage
-            FROM {tax_table_name}
-            WHERE min_income <= :income AND max_income >= :income
-        """)
-        row_projected_income = tax_engine.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
+            query_projected_income = text(f"""
+                SELECT min_income, tax_on_previous_bracket, tax_percentage
+                FROM {tax_table_name}
+                WHERE min_income <= :income AND max_income >= :income
+            """)
+            row_projected_income = connection.execute(query_projected_income, {"income": projected_annual_income}).fetchone()
 
-        if not row_projected_income:
-            logging.warning("No matching tax row found for projected_annual_income")
-            return jsonify({"error": "No matching tax row for projected_annual_income"}), 404
+            if not row_projected_income:
+                logging.warning("No matching tax row found for projected_annual_income")
+                return jsonify({"error": "No matching tax row for projected_annual_income"}), 404
 
-        query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
-        rebate_row = rebate_engine.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
+        with rebate_engine.connect() as connection:
+            query_rebate_table = text("SELECT rebate_value FROM rebate_table WHERE age_group = :age_group AND financial_year = :financial_year")
+            rebate_row = connection.execute(query_rebate_table, {"age_group": age_group, "financial_year": financial_year}).fetchone()
 
-        if not rebate_row:
-            logging.warning("No matching rebate row found")
-            return jsonify({"error": "No matching rebate row found"}), 404
+            if not rebate_row:
+                logging.warning("No matching rebate row found")
+                return jsonify({"error": "No matching rebate row found"}), 404
 
         tax_details = {
             "financial_year": financial_year,
