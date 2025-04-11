@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, MetaData, Table, Column, Integer, Float, D
 from datetime import datetime
 
 # Database connection
-engine = create_engine('sqlite:///tax_database.db')  # Ensure the path to your database file is correct
+engine = create_engine('sqlite:///app/databases/tax_database.db')  # Ensure the path to your database file is correct
 metadata = MetaData()
 
 def create_and_populate_future_table(table_name, effective_date, end_date, tax_data):

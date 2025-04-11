@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Float
 
 # Database connection
-engine = create_engine('sqlite:///rebate_database.db')  # Connect to (or create) the database
+engine = create_engine('sqlite:///app/databases/rebate_database.db')  # Connect to (or create) the database
 metadata = MetaData()
 
 # Define the rebate table schema

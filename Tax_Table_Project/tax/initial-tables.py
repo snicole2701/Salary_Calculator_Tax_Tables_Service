@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, Date, MetaData, Ta
 from datetime import datetime
 
 # Database connection
-engine = create_engine('sqlite:///tax_database.db')  # Connect to (or create) the database
+engine = create_engine('sqlite:///app/databases/tax_database.db')  # Connect to (or create) the database
 metadata = MetaData()
 
 # Define the tax_table schema

@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, MetaData, Table
 
 # Database connection
-engine = create_engine('sqlite:///rebate_database.db')  # Ensure the path to your database file is correct
+engine = create_engine('sqlite:///app/databases/rebate_database.db')  # Ensure the path to your database file is correct
 metadata = MetaData()
 
 def add_future_rebates():
