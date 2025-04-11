@@ -12,8 +12,8 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Database connection setup
-TAX_DB_URI = os.getenv("TAX_DB_URI", "sqlite:///tax_database.db")
-REBATE_DB_URI = os.getenv("REBATE_DB_URI", "sqlite:///rebate_database.db")
+TAX_DB_URI = os.getenv("TAX_DB_URI", "sqlite:///C:/Users/USER-PC/Desktop/Salary Calculator Backend Development/Databases/tax_database.db")
+REBATE_DB_URI = os.getenv("REBATE_DB_URI", "sqlite:///C:/Users/USER-PC/Desktop/Salary Calculator Backend Development/Databases/rebate_database.db")
 USER_INPUT_SERVICE_BASE_URL = os.getenv("USER_INPUT_SERVICE_BASE_URL", "https://salary-calculator-user-input.onrender.com")
 CALCULATION_SERVICE_BASE_URL = os.getenv("CALCULATION_SERVICE_BASE_URL", "https://salary-calculator-calculation-service.onrender.com")
 
